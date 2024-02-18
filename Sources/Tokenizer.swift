@@ -2,7 +2,7 @@
 //  Tokenizer.swift
 //  SwiftFormat
 //
-//  Version 0.53.0
+//  Version 0.53.2
 //
 //  Created by Nick Lockwood on 11/08/2016.
 //  Copyright 2016 Nick Lockwood
@@ -65,12 +65,20 @@ public extension String {
 
     /// Is this string a comment directive (MARK:, TODO:, swiftlint:, etc)?
     var isCommentDirective: Bool {
+        commentDirective != nil
+    }
+
+    /// Returns comment directive prefix (MARK:, TODO:, swiftlint:, etc)?
+    var commentDirective: String? {
         let parts = split(separator: ":")
         guard parts.count > 1 else {
-            return false
+            return nil
         }
         let exclude = ["note", "warning"]
-        return !parts[0].contains(" ") && !exclude.contains(parts[0].lowercased()) && !parts[1].hasPrefix("//")
+        guard !parts[0].contains(" "), !exclude.contains(parts[0].lowercased()), !parts[1].hasPrefix("//") else {
+            return nil
+        }
+        return String(parts[0])
     }
 }
 
@@ -95,6 +103,7 @@ public enum TokenType {
     case spaceOrComment
     case spaceOrLinebreak
     case spaceOrCommentOrLinebreak
+    case keywordOrAttribute
     case identifierOrKeyword
 
     /// NOT types
@@ -334,6 +343,8 @@ public extension Token {
             return isEndOfScope
         case .keyword:
             return isKeyword
+        case .keywordOrAttribute:
+            return isKeywordOrAttribute
         case .identifier:
             return isIdentifier
         case .identifierOrKeyword:
@@ -365,7 +376,7 @@ public extension Token {
         }
     }
 
-    var isAttribute: Bool { isKeyword && string.hasPrefix("@") }
+    var isAttribute: Bool { isKeywordOrAttribute && string.hasPrefix("@") }
     var isDelimiter: Bool { hasType(of: .delimiter("")) }
     var isOperator: Bool { hasType(of: .operator("", .none)) }
     var isUnwrapOperator: Bool { isOperator("?", .postfix) || isOperator("!", .postfix) }
@@ -374,9 +385,10 @@ public extension Token {
     var isError: Bool { hasType(of: .error("")) }
     var isStartOfScope: Bool { hasType(of: .startOfScope("")) }
     var isEndOfScope: Bool { hasType(of: .endOfScope("")) }
-    var isKeyword: Bool { hasType(of: .keyword("")) }
+    var isKeyword: Bool { isKeywordOrAttribute && !string.hasPrefix("@") }
+    var isKeywordOrAttribute: Bool { hasType(of: .keyword("")) }
     var isIdentifier: Bool { hasType(of: .identifier("")) }
-    var isIdentifierOrKeyword: Bool { isIdentifier || isKeyword }
+    var isIdentifierOrKeyword: Bool { isIdentifier || isKeywordOrAttribute }
     var isSpace: Bool { hasType(of: .space("")) }
     var isLinebreak: Bool { hasType(of: .linebreak("", 0)) }
     var isEndOfStatement: Bool { self == .delimiter(";") || isLinebreak }
@@ -1831,11 +1843,6 @@ public func tokenize(_ source: String) -> [Token] {
                         if let keywordIndex = index(of: .keyword, before: scopeIndex) {
                             var keyword = tokens[keywordIndex]
                             if keyword == .keyword("where"),
-                               let keywordIndex = index(of: .keyword, before: keywordIndex)
-                            {
-                                keyword = tokens[keywordIndex]
-                            }
-                            if keyword.isAttribute,
                                let keywordIndex = index(of: .keyword, before: keywordIndex)
                             {
                                 keyword = tokens[keywordIndex]

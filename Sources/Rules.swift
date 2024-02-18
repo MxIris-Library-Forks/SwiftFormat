@@ -214,8 +214,8 @@ public struct _FormatRules {
     public let spaceAroundParens = FormatRule(
         help: "Add or remove space around parentheses."
     ) { formatter in
-        func spaceAfter(_ keyword: String, index: Int) -> Bool {
-            switch keyword {
+        func spaceAfter(_ keywordOrAttribute: String, index: Int) -> Bool {
+            switch keywordOrAttribute {
             case "@autoclosure":
                 if formatter.options.swiftVersion < "3",
                    let nextIndex = formatter.index(of: .nonSpaceOrLinebreak, after: index),
@@ -227,7 +227,7 @@ public struct _FormatRules {
                 return true
             case "@escaping", "@noescape", "@Sendable":
                 return true
-            case _ where keyword.hasPrefix("@"):
+            case _ where keywordOrAttribute.hasPrefix("@"):
                 if let i = formatter.index(of: .startOfScope("("), after: index) {
                     return formatter.isParameterList(at: i)
                 }
@@ -239,7 +239,7 @@ public struct _FormatRules {
                 return formatter.options.swiftVersion >= "5.5" ||
                     formatter.options.swiftVersion == .undefined
             default:
-                return keyword.first.map { !"@#".contains($0) } ?? true
+                return keywordOrAttribute.first.map { !"@#".contains($0) } ?? true
             }
         }
 
@@ -952,7 +952,7 @@ public struct _FormatRules {
         ].contains($0) }) { i, token in
             guard let next = formatter.next(.nonSpaceOrCommentOrLinebreak, after: i),
                   // exit if class is a type modifier
-                  !(next.isKeyword || next.isModifierKeyword),
+                  !(next.isKeywordOrAttribute || next.isModifierKeyword),
                   // exit if import statement
                   formatter.last(.nonSpaceOrCommentOrLinebreak, before: i) != .keyword("import"),
                   // exit for class as protocol conformance
@@ -1173,7 +1173,7 @@ public struct _FormatRules {
             if formatter.tokens[nextIndex] == .startOfScope("#if") {
                 var keyword = "#if"
                 while keyword == "#if",
-                      let index = formatter.index(of: .keyword, after: nextIndex)
+                      let index = formatter.index(of: .keywordOrAttribute, after: nextIndex)
                 {
                     nextIndex = index
                     keyword = formatter.tokens[nextIndex].string
@@ -3405,12 +3405,12 @@ public struct _FormatRules {
                     }
                     if formatter.last(.nonSpaceOrCommentOrLinebreak, before: i)?.isOperator(".") == false,
                        formatter.next(.nonSpaceOrCommentOrLinebreak, after: i) != .delimiter(":") ||
-                       formatter.currentScope(at: i) == .startOfScope("[")
+                       [.startOfScope("("), .startOfScope("[")].contains(formatter.currentScope(at: i) ?? .space(""))
                     {
                         if isDeclaration {
                             switch formatter.next(.nonSpaceOrCommentOrLinebreak, after: i) {
                             case .endOfScope(")")?, .operator("=", .infix)?,
-                                 .delimiter(",")? where !isConditional || formatter.currentScope(at: i) == .startOfScope("("):
+                                 .delimiter(",")? where !isConditional:
                                 tempLocals.insert(name)
                                 break outer
                             default:
@@ -3466,7 +3466,10 @@ public struct _FormatRules {
                     ].contains(scope) {
                         break
                     }
-                    if isConditional, !isGuard {
+                    if isConditional {
+                        if isGuard, wasDeclaration {
+                            pushLocals()
+                        }
                         wasDeclaration = false
                     } else {
                         let _wasDeclaration = wasDeclaration
@@ -4277,11 +4280,8 @@ public struct _FormatRules {
         options: ["header"],
         sharedOptions: ["linebreaks"]
     ) { formatter in
-        guard let headerRange = formatter.headerCommentTokenRange else {
-            return
-        }
-
-        let header: String
+        var headerTokens = [Token]()
+        var directives = [String]()
         switch formatter.options.fileHeader {
         case .ignore:
             return
@@ -4304,15 +4304,24 @@ public struct _FormatRules {
             {
                 string.replaceSubrange(range, with: yearFormatter(date))
             }
-            header = string
+            headerTokens = tokenize(string)
+            directives = headerTokens.compactMap {
+                guard case let .commentBody(body) = $0 else {
+                    return nil
+                }
+                return body.commentDirective
+            }
         }
 
-        if header.isEmpty {
+        guard let headerRange = formatter.headerCommentTokenRange(includingDirectives: directives) else {
+            return
+        }
+
+        if headerTokens.isEmpty {
             formatter.removeTokens(in: headerRange)
             return
         }
 
-        var headerTokens = tokenize(header)
         var lastHeaderTokenIndex = headerRange.endIndex - 1
         let endIndex = lastHeaderTokenIndex + headerTokens.count
         if formatter.tokens.endIndex > endIndex, headerTokens == Array(formatter.tokens[
@@ -4348,7 +4357,7 @@ public struct _FormatRules {
         orderAfter: ["fileHeader"]
     ) { formatter in
         guard let fileName = formatter.options.fileInfo.fileName,
-              let headerRange = formatter.headerCommentTokenRange,
+              let headerRange = formatter.headerCommentTokenRange(includingDirectives: ["*"]),
               fileName.hasSuffix(".swift")
         else {
             return
@@ -5408,25 +5417,21 @@ public struct _FormatRules {
                   var keywordIndex = formatter.index(
                       of: .nonSpaceOrCommentOrLinebreak,
                       after: endIndex, if: { $0.isKeyword || $0.isModifierKeyword }
-                  ),
-                  var keyword = formatter.token(at: keywordIndex),
-                  !formatter.tokens[keywordIndex].isAttribute
+                  )
             else {
                 return
             }
 
             // Skip modifiers
-            while formatter.isModifier(at: keywordIndex) {
-                guard let nextIndex = formatter.index(of: .keyword, after: keywordIndex) else {
-                    break
-                }
+            while formatter.isModifier(at: keywordIndex),
+                  let nextIndex = formatter.index(of: .keyword, after: keywordIndex)
+            {
                 keywordIndex = nextIndex
-                keyword = formatter.tokens[keywordIndex]
             }
 
             // Check which `AttributeMode` option to use
             let attributeMode: AttributeMode
-            switch keyword.string {
+            switch formatter.tokens[keywordIndex].string {
             case "func", "init", "subscript":
                 attributeMode = formatter.options.funcAttributes
             case "class", "actor", "struct", "enum", "protocol", "extension":
@@ -7301,17 +7306,19 @@ public struct _FormatRules {
         help: "Remove redundant internal access control."
     ) { formatter in
         formatter.forEach(.keyword("internal")) { internalKeywordIndex, _ in
-            let accessControlLevels = ["public", "package", "internal", "private", "fileprivate"]
+            // Don't remove import acl
+            if formatter.next(.nonSpaceOrComment, after: internalKeywordIndex) == .keyword("import") {
+                return
+            }
 
-            // If we're inside an extension, than `internal` is only redundant
-            // if the extension itself is `internal`.
+            // If we're inside an extension, then `internal` is only redundant if the extension itself is `internal`.
             if let startOfScope = formatter.startOfScope(at: internalKeywordIndex),
                let typeKeywordIndex = formatter.indexOfLastSignificantKeyword(at: startOfScope),
                formatter.tokens[typeKeywordIndex] == .keyword("extension"),
                // In the language grammar, the ACL level always directly precedes the
                // `extension` keyword if present.
                let previousToken = formatter.last(.nonSpaceOrCommentOrLinebreak, before: typeKeywordIndex),
-               accessControlLevels.contains(previousToken.string),
+               ["public", "package", "internal", "private", "fileprivate"].contains(previousToken.string),
                previousToken.string != "internal"
             {
                 // The extension has an explicit ACL other than `internal`, so is not internal.

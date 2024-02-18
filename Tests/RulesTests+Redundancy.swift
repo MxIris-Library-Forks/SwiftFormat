@@ -6548,6 +6548,24 @@ class RedundancyTests: RulesTests {
         testFormatting(for: input, rule: FormatRules.redundantSelf, options: options, exclude: ["enumNamespaces"])
     }
 
+    func testRedundantSelfNotConfusedByMainActor() {
+        let input = """
+        class Test {
+            private var p: Int
+
+            func f() {
+                self.f2(
+                    closure: { @MainActor [weak self] p in
+                        print(p)
+                    }
+                )
+            }
+        }
+        """
+        let options = FormatOptions(explicitSelf: .insert)
+        testFormatting(for: input, rule: FormatRules.redundantSelf, options: options)
+    }
+
     // MARK: - redundantStaticSelf
 
     func testRedundantStaticSelfInStaticVar() {
@@ -7782,6 +7800,43 @@ class RedundancyTests: RulesTests {
         }
         """
         testFormatting(for: input, rule: FormatRules.unusedArguments)
+    }
+
+    func testFunctionArgumentUsedInGuardNotRemoved2() {
+        let input = """
+        func convert(
+            filter: Filter,
+            accounts: [Account],
+            outgoingTotal: MulticurrencyTotal?
+        ) -> History? {
+            guard
+                let firstParameter = incomingTotal?.currency,
+                let secondParameter = outgoingTotal?.currency,
+                isFilter(filter, accounts: accounts)
+            else {
+                return nil
+            }
+            return History(firstParameter, secondParameter)
+        }
+        """
+        testFormatting(for: input, rule: FormatRules.unusedArguments)
+    }
+
+    func testFunctionArgumentUsedInGuardNotRemoved3() {
+        let input = """
+        public func flagMessage(_ message: Message) {
+          model.withState { state in
+            guard
+              let flagMessageFeature,
+              shouldAllowFlaggingMessage(
+                message,
+                thread: state.thread)
+            else { return }
+          }
+        }
+        """
+        testFormatting(for: input, rule: FormatRules.unusedArguments,
+                       exclude: ["wrapArguments", "wrapConditionalBodies", "indent"])
     }
 
     // functions (closure-only)
@@ -9143,6 +9198,11 @@ class RedundancyTests: RulesTests {
         """
 
         testFormatting(for: input, output, rule: FormatRules.redundantInternal, exclude: ["redundantExtensionACL"])
+    }
+
+    func testPreserveInternalImport() {
+        let input = "internal import MyPackage"
+        testFormatting(for: input, rule: FormatRules.redundantInternal)
     }
 
     // MARK: - noExplicitOwnership
