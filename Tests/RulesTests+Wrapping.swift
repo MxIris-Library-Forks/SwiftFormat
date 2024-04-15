@@ -4644,6 +4644,42 @@ class WrappingTests: RulesTests {
                        exclude: ["hoistPatternLet"])
     }
 
+    func testNoMangleUnindentedEnumCases() {
+        let input = """
+        enum Foo {
+        case foo, bar
+        }
+        """
+        let output = """
+        enum Foo {
+        case foo
+        case bar
+        }
+        """
+        testFormatting(for: input, output, rule: FormatRules.wrapEnumCases, exclude: ["indent"])
+    }
+
+    func testNoMangleEnumCaseOnOpeningLine() {
+        let input = """
+        enum SortOrder { case
+            asc(String), desc(String)
+        }
+        """
+        // TODO: improve formatting here
+        let output = """
+        enum SortOrder { case
+            asc(String)
+        case desc(String)
+        }
+        """
+        testFormatting(for: input, output, rule: FormatRules.wrapEnumCases, exclude: ["indent"])
+    }
+
+    func testNoWrapSingleLineEnumCases() {
+        let input = "enum Foo { case foo, bar }"
+        testFormatting(for: input, rule: FormatRules.wrapEnumCases)
+    }
+
     // MARK: wrapSwitchCases
 
     func testMultilineSwitchCases() {

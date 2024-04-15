@@ -2752,20 +2752,6 @@ public struct _FormatRules {
                 break
             }
             switch prevToken {
-            case _ where isClosure:
-                if formatter.index(of: .nonSpaceOrCommentOrLinebreak, after: i) == closingIndex ||
-                    formatter.index(of: .delimiter(":"), in: i + 1 ..< closingIndex) != nil ||
-                    formatter.tokens[i + 1 ..< closingIndex].contains(.identifier("self"))
-                {
-                    return
-                }
-                if let index = formatter.tokens[i + 1 ..< closingIndex].firstIndex(of: .identifier("_")),
-                   formatter.next(.nonSpaceOrComment, after: index)?.isIdentifier == true
-                {
-                    return
-                }
-                formatter.removeParen(at: closingIndex)
-                formatter.removeParen(at: i)
             case .stringBody, .operator("?", .postfix), .operator("!", .postfix), .operator("->", .infix):
                 return
             case .identifier: // TODO: are trailing closures allowed in other cases?
@@ -2776,6 +2762,20 @@ public struct _FormatRules {
                       }),
                       formatter.isStartOfClosure(at: openingIndex)
                 else {
+                    return
+                }
+                formatter.removeParen(at: closingIndex)
+                formatter.removeParen(at: i)
+            case _ where isClosure:
+                if formatter.index(of: .nonSpaceOrCommentOrLinebreak, after: i) == closingIndex ||
+                    formatter.index(of: .delimiter(":"), in: i + 1 ..< closingIndex) != nil ||
+                    formatter.tokens[i + 1 ..< closingIndex].contains(.identifier("self"))
+                {
+                    return
+                }
+                if let index = formatter.tokens[i + 1 ..< closingIndex].firstIndex(of: .identifier("_")),
+                   formatter.next(.nonSpaceOrComment, after: index)?.isIdentifier == true
+                {
                     return
                 }
                 formatter.removeParen(at: closingIndex)
@@ -3962,20 +3962,24 @@ public struct _FormatRules {
     ) { formatter in
 
         func shouldWrapCaseRangeGroup(_ caseRangeGroup: [Formatter.EnumCaseRange]) -> Bool {
-            formatter.options.wrapEnumCases == .always
-                || caseRangeGroup
-                .first(
-                    where: { formatter.tokens[$0.value].contains { token in
-                        token == .startOfScope("(") || token == .operator("=", .infix)
-                    }}
-                ) != nil
+            guard let firstIndex = caseRangeGroup.first?.value.lowerBound,
+                  let scopeStart = formatter.startOfScope(at: firstIndex),
+                  formatter.tokens[scopeStart ..< firstIndex].contains(where: { $0.isLinebreak })
+            else {
+                // Don't wrap if first case is on same line as opening `{`
+                return false
+            }
+            return formatter.options.wrapEnumCases == .always || caseRangeGroup.contains(where: {
+                formatter.tokens[$0.value].contains(where: {
+                    [.startOfScope("("), .operator("=", .infix)].contains($0)
+                })
+            })
         }
 
         formatter.parseEnumCaseRanges()
             .filter(shouldWrapCaseRangeGroup)
             .flatMap { $0 }
             .filter { $0.endOfCaseRangeToken == .delimiter(",") }
-            .sorted()
             .reversed()
             .forEach { enumCase in
                 guard var nextNonSpaceIndex = formatter.index(of: .nonSpace, after: enumCase.value.upperBound) else {
@@ -4001,9 +4005,10 @@ public struct _FormatRules {
                     formatter.insertLinebreak(at: nextNonSpaceIndex)
                 }
 
+                let offset = indent.isEmpty ? 0 : 1
                 formatter.insertSpace(indent, at: nextNonSpaceIndex + 1)
-                formatter.insert([.keyword("case")], at: nextNonSpaceIndex + 2)
-                formatter.insertSpace(" ", at: nextNonSpaceIndex + 3)
+                formatter.insert([.keyword("case")], at: nextNonSpaceIndex + 1 + offset)
+                formatter.insertSpace(" ", at: nextNonSpaceIndex + 2 + offset)
             }
     }
 
@@ -4430,7 +4435,7 @@ public struct _FormatRules {
             let type = formatter.parseType(at: startOfTypeIndex),
             // Filter out values that start with a lowercase letter.
             // This covers edge cases like `super.init()`, where the `init` is not redundant.
-            let firstChar = type.name.first,
+            let firstChar = type.name.components(separatedBy: ".").last?.first,
             firstChar != "$",
             String(firstChar).uppercased() == String(firstChar)
             else { return }
