@@ -2737,10 +2737,10 @@ public struct _FormatRules {
                    }) == nil,
                    let scopeIndex = formatter.startOfScope(at: i)
                 {
-                    isClosure = formatter.isStartOfClosure(at: scopeIndex)
+                    isClosure = formatter.isStartOfClosure(at: scopeIndex) && formatter.isInClosureArguments(at: i)
                 }
                 if !isClosure, nextToken != .keyword("in") {
-                    return // It's a closure type or function declaration
+                    return // It's a closure type, function declaration or for loop
                 }
             case .operator:
                 if case let .operator(inner, _)? = formatter.last(.nonSpace, before: closingIndex),
@@ -6566,10 +6566,10 @@ public struct _FormatRules {
         options: ["someany"]
     ) { formatter in
         formatter.forEach(.keyword) { keywordIndex, keyword in
-            guard // Apply this rule to any function-like declaration
-                ["func", "init", "subscript"].contains(keyword.string),
-                // Opaque generic parameter syntax is only supported in Swift 5.7+
+            guard // Opaque generic parameter syntax is only supported in Swift 5.7+
                 formatter.options.swiftVersion >= "5.7",
+                // Apply this rule to any function-like declaration
+                [.keyword("func"), .keyword("init"), .keyword("subscript")].contains(keyword),
                 // Validate that this is a generic method using angle bracket syntax,
                 // and find the indices for all of the key tokens
                 let paramListStartIndex = formatter.index(of: .startOfScope("("), after: keywordIndex),
@@ -6579,7 +6579,9 @@ public struct _FormatRules {
                 genericSignatureStartIndex < paramListStartIndex,
                 genericSignatureEndIndex < paramListStartIndex,
                 let openBraceIndex = formatter.index(of: .startOfScope("{"), after: paramListEndIndex),
-                let closeBraceIndex = formatter.endOfScope(at: openBraceIndex)
+                let closeBraceIndex = formatter.endOfScope(at: openBraceIndex),
+                // Ignore anything with attributes
+                !formatter.modifiersForDeclaration(at: keywordIndex, contains: { $1.hasPrefix("@") })
             else { return }
 
             var genericTypes = [Formatter.GenericType]()

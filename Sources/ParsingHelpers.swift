@@ -413,8 +413,15 @@ extension Formatter {
             case .endOfScope(")"):
                 guard let startIndex = self.index(of: .startOfScope("("), before: prevIndex),
                       last(.nonSpaceOrCommentOrLinebreak, before: startIndex, if: {
-                          $0.isAttribute || _FormatRules.allModifiers.contains($0.string)
+                          $0.isAttribute || _FormatRules.allModifiers.contains($0.string) || $0 == .endOfScope(">")
                       }) != nil
+                else {
+                    return false
+                }
+                prevIndex = startIndex
+            case .endOfScope(">"):
+                guard let startIndex = self.index(of: .startOfScope("<"), before: prevIndex),
+                      last(.nonSpaceOrCommentOrLinebreak, before: startIndex, if: { $0.isAttribute }) != nil
                 else {
                     return false
                 }
@@ -632,13 +639,19 @@ extension Formatter {
         var i = i
         while let token = token(at: i) {
             switch token {
-            case .keyword("in"), .keyword("throws"), .keyword("rethrows"):
+            case .keyword("in"), .keyword("throws"), .keyword("rethrows"), .identifier("async"):
                 guard let scopeIndex = index(of: .startOfScope, before: i, if: {
                     $0 == .startOfScope("{")
-                }) else {
+                }), isStartOfClosure(at: scopeIndex) else {
                     return false
                 }
-                return isStartOfClosure(at: scopeIndex)
+                if token != .keyword("in"),
+                   let arrowIndex = index(of: .operator("->", .infix), after: i),
+                   next(.keyword, after: arrowIndex) != .keyword("in")
+                {
+                    return false
+                }
+                return true
             case .startOfScope("("), .startOfScope("["), .startOfScope("<"),
                  .endOfScope(")"), .endOfScope("]"), .endOfScope(">"),
                  .keyword where token.isAttribute, _ where token.isComment:
@@ -1229,11 +1242,18 @@ extension Formatter {
     func parseType(at startOfTypeIndex: Int) -> (name: String, range: ClosedRange<Int>)? {
         guard let baseType = parseNonOptionalType(at: startOfTypeIndex) else { return nil }
 
-        // Any type can be optional, so check for a trailing `?` or `!`
-        if let nextToken = index(of: .nonSpaceOrCommentOrLinebreak, after: baseType.range.upperBound),
-           ["?", "!"].contains(tokens[nextToken].string)
+        // Any type can be optional, so check for a trailing `?` or `!`.
+        // There cannot be any other tokens between the type and the operator:
+        //
+        //   let foo: String? // allowed
+        //   let foo: String ? // not allowed
+        //   let foo: String/*bar*/? // not allowed
+        //
+        let nextTokenIndex = baseType.range.upperBound + 1
+        if let nextToken = token(at: nextTokenIndex),
+           ["?", "!"].contains(nextToken.string)
         {
-            let typeRange = baseType.range.lowerBound ... nextToken
+            let typeRange = baseType.range.lowerBound ... nextTokenIndex
             return (name: tokens[typeRange].string, range: typeRange)
         }
 
