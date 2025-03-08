@@ -1,5 +1,160 @@
 # Change Log
 
+## [0.55.5](https://github.com/nicklockwood/SwiftFormat/releases/tag/0.55.5) (2025-01-20)
+
+- Fixed bug with `yodaConditions` rule mangling generic function calls
+- Fixed indenting of guard `else` or opening brace following `if`/`switch` expression
+- The `organizeDeclarations` rule no longer treats properties with `didSet` as computed
+- Improved formatting support for async and throwing closures
+
+## [0.55.4](https://github.com/nicklockwood/SwiftFormat/releases/tag/0.55.4) (2024-12-22)
+
+- Fixed inconsistent indenting of wrapped `where` clause for `switch ... case` statements
+- Fixed bug where `unusedArguments` could remove required arguments in some cases
+- The `sortTypealiases` rule now correctly handles `any` keyword
+
+## [0.55.3](https://github.com/nicklockwood/SwiftFormat/releases/tag/0.55.3) (2024-11-26)
+
+- Fixed bug where `sortTypealiases` rule could mangle generic types, or ones using the `any` keyword
+- The `preferKeyPaths` rule now only uses `\\.self` for Swift 6 and later (fix din't land yet in 5.10)
+- Added speculative fix for plugin `artifactbundle` not working on `ubuntu-latest`
+
+## [0.55.2](https://github.com/nicklockwood/SwiftFormat/releases/tag/0.55.2) (2024-11-24)
+
+- Fixed bug where `unusedArguments` failed to remove arguments that matched switch variable bindings
+- Fixed bug where `unusedArguments` failed to remove arguments that matched nested function call labels
+- Fixed spurious lint errors for `blankLinesAtStartOfScope` when using `organizeDeclarations` rule
+- Fixed bug where indentation errors were incorrectly reported as `wrap` rule lint errors
+- The `preferKeyPaths` rule now handles the `\\.self` case for Swift 5.10 and later
+- Fixed parsing of keyPaths beginning with `\.?`
+
+## [0.55.1](https://github.com/nicklockwood/SwiftFormat/releases/tag/0.55.1) (2024-11-20)
+
+- Fixed bug where `docCommentsBeforeModifiers` got confused by `enum` cases that match modifier names
+- Fixed bug where `wrapEnumCases` would mangle nested or successive `enum` declarations
+- Artifact Bundle now includes pre-built binary for ARM-based Linux systems
+
+## [0.55.0](https://github.com/nicklockwood/SwiftFormat/releases/tag/0.55.0) (2024-11-16)
+
+- Added `docCommentsBeforeModifiers` rule to hoist doc comments above declaration modifiers
+- Added `unusedPrivateDeclarations` rule to remove unused `private` or `fileprivate` declarations
+- Added `propertyTypes` rule to control the use of inferred or explicit types for properties
+- Renamed the `--redundanttype` option to `--propertytypes` as it's shared by both rules
+- Added `--ranges preserve` and `--operatorfunc preserve` options
+- Added `--languagemode` option to specify if you are using Swift 5 or 6 language mode
+- The `organizeDeclarations` rule can now sort declarations by name/type/visibility/etc
+- Fixed `organizeDeclarations` bug where `--beforemarks` unexpectedly matched keywords in function bodies
+- Fixed missing lint output for `organizeDeclarations` rule
+- Fixed bug in `markTypes` rule for chained protocol extension names
+- Renamed the confusing `--onelineforeach` option to `--inlinedforeach`
+- Git info can now be used in header comments when formatting code from stdin
+- You can now use the `--outputtokens` option to print output as tokens in JSON format
+- Each rule and test is now defined in a separate file to make it easier to maintain/contribute
+- Updated minimum Swift version for building SwiftFormat to 5.3 (you can still format older Swift code)
+- Docker build now uses static Linux SDK
+
+## [0.54.6](https://github.com/nicklockwood/SwiftFormat/releases/tag/0.54.6) (2024-10-07)
+
+- Fixed incorrect wrapping of conditional bodies inside single-line string literals
+- Fixed properties inside type with where clause being treated as local scope
+- Fixed regression in `wrapMultilineStatementBraces` rule
+- Fixed tokenizing of a throwing closure type in a generics clause
+- Fixed bug in `parseDeclarations` where incorrect tokens could cause rules to time out
+- Fixed issue where `organizeDeclarations` would add extra blank lines if type had blank lines with spaces
+- Updated SwiftFormat for Xcode installation instructions for macOS 15 Sequoia
+- Added known issue to README for `preferForLoop` rule
+
+## [0.54.5](https://github.com/nicklockwood/SwiftFormat/releases/tag/0.54.5) (2024-09-11)
+
+- Fixed crash in `unusedArguments` rule
+- Fixed bug where `preferForLoop` failed if `forEach` contains `guard ... else { return }`
+
+## [0.54.4](https://github.com/nicklockwood/SwiftFormat/releases/tag/0.54.4) (2024-09-07)
+
+- Fixed bug where trailing comma was erroneously inserted into a wrapped array type extension
+- Fixed bug where `return` was incorrectly removed inside `catch` statement with `where` clause
+- Fixed `opaqueGenericParameters` rule being incorrectly applied to functions with typed `throws`
+- Fixed `spaceAroundBrackets` behaving incorrectly inside a macro invocation
+- Fixed `unusedArguments` false positive inside multiline string literal
+- Fixed a case where removing `return` resulted in non-compiling code for opaque return types
+- Redundant `Void` return type is now removed from functions in protocol declarations
+- Fixed a bug where `unusedArguments` didn't handle conditional assignment shadowing correctly
+- Fixed Xcode 16 Beta warnings related to unhandled files when building SwiftFormat package
+- The Swift runtime is now packaged with the installer on Windows as on Linux
+- The Windows installer now uses a more conventional directory structure
+- SwiftFormat for Windows now supports arm64
+
+## [0.54.3](https://github.com/nicklockwood/SwiftFormat/releases/tag/0.54.3) (2024-07-28)
+
+- Fixed issue where `--wrapeffects never` could unexpectedly remove unrelated code
+- Fixed `--condassignment` option (setting this previously had no effect)
+- The `redundantReturn` rule no longer removes conditional `return`s if `conditionalAssignment` is disabled
+- The `redundantObjc` rule now strips implicit `@objc` attribute for `@IBSegueAction` functions
+- Fixed bug where violations for rules that insert new lines were sometimes ignored in lint output
+
+## [0.54.2](https://github.com/nicklockwood/SwiftFormat/releases/tag/0.54.2) (2024-07-22)
+
+- Fixed broken formatter cache, which caused a significant performance regression since 0.54.0
+- The `blankLinesBetweenChainedFunctions` rule now removes blank line after comments in the chain
+- The `blankLinesBetweenChainedFunctions` rule no longer conflicts with `blankLinesAroundMark`
+- Fixed`redundantInternal` removing required `internal` keyword in extensions with `where` clause
+- Fixed another case of spurious `return` removal in conditional blocks
+- Fixed `redundantNilInit` rule inserting `nil` after `as` keyword
+
+## [0.54.1](https://github.com/nicklockwood/SwiftFormat/releases/tag/0.54.1) (2024-07-10)
+
+- The `--nilInit insert` option is no longer applied to lazy or attributed properties
+- The `blankLinesBetweenChainedFunctions` rule now correctly handles comments in the chain
+- Fixed indenting of wrapped arguments in `--fragment` mode
+- Fixed bug where attributes were mistaken for an accessor in a computer property
+- Fixed indenting of commented code after an opening bracket
+- Fixed spurious removal of `return` in conditional blocks
+- Fixed `--lint` mode reporter output when using `stdin`
+
+## [0.54.0](https://github.com/nicklockwood/SwiftFormat/releases/tag/0.54.0) (2024-06-11)
+
+- Added `blankLineAfterSwitchCase` rule for inserting blank lines after switch cases
+- Added `consistentSwitchCaseSpacing` rule for ensuring consistent spacing between switch cases
+- Added `redundantProperty` rule for removing variable assignments where value is immediately returned
+- Added `redundantTypedThrows` rule for stripping redundant `Never` or `any Error` `throws` types
+- Setting `--report` without `--reporter` type now raises an error if type can't be inferred
+- Added XML reporter for Checkstyle-compatible lint reporting (use the `--reporter xml` option)
+- Added `--typedelimiter` option for controlling spacing around the colon in type definitions
+- Added `--initcodernil` option for returning `nil` instead of asserting in unavailable `init?(coder:)`
+- The `fileHeader` rule now uses git info for `created` date (if available) instead of file system
+- Added git `author`, `author.name` and `author.email` tokens for file header templates
+- Added `--callsiteparen` option for controlling closing paren placement at function call sites
+- The `wrapAttributes` rule can now be applied differently to computed properties vs stored properties
+- The `wrapAttributes` rule can now be applied differently to complex (parameterized) vs simple attributes
+- Replaced `--varattributes` with `--storedvarattrs`, `--computedvarattrs` and `--complexattrs` options
+- Added `—-nilinit`  option for controlling whether `redundantNilInit` adds or removes explicit `nil`
+- Added ability to organize declarations by type over visibility (use `--organizationmode type`)
+- Fixed bug where enabling `organizeDeclarations` for structs caused `sortDeclarations` to have no effect
+- Fixed bug where if statement body could be incorrectly parsed as a trailing closure
+- Improved attribute handling in `opaqueGenericParameters rule`
+- SwiftFormat now recognizes `init` and `_modify` property accessors
+- Fixed bug with `preferForLoop` rule and tuple argument matching
+- Extended `conditionalAssignment` rule to handle more cases
+- Added `--condassignment after-property` option
+- Fixed await being hoisted outside of macro arguments
+- Fixed unsafe adding/removal of `self` within macros
+- Added `os_log` to `--selfrequired` defaults
+
+## [0.53.10](https://github.com/nicklockwood/SwiftFormat/releases/tag/0.53.10) (2024-05-18)
+
+- Fixed creation of spurious `stdout` directory when using `--output stdout`
+- Fixed `unusedArguments` false positive for multiline function call arguments
+- Fixed parsing of generic arguments containing attributes or `~` operator
+- Fixed spurious errors about missing `--report` or `--reporter` arguments
+- Fixed `strongifiedSelf` removing required backticks around nonisolated `self`
+- Deprecated explicit `default` value for `--reporter` (introduced in 0.53.9)
+- Added support for `sending` keyword 
+
+## [0.53.9](https://github.com/nicklockwood/SwiftFormat/releases/tag/0.53.9) (2024-05-12)
+
+- Fixed bug in `unusedArguments` when shadowing function argument with conditional assignment declaration
+- Individual `--lint` errors are no longer shown in `--quiet` mode (restores pre-0.53.8 behavior)
+
 ## [0.53.8](https://github.com/nicklockwood/SwiftFormat/releases/tag/0.53.8) (2024-04-22)
 
 - Added `--strict` option to emit non-zero exit code after applying changes in formatting mode

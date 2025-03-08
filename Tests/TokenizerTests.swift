@@ -3459,6 +3459,39 @@ class TokenizerTests: XCTestCase {
         XCTAssertEqual(tokenize(input), output)
     }
 
+    func testGenericThrowingClosure() {
+        let input = "let a = Thing<[(Int) throws -> [Int]]>([])"
+        let output: [Token] = [
+            .keyword("let"),
+            .space(" "),
+            .identifier("a"),
+            .space(" "),
+            .operator("=", .infix),
+            .space(" "),
+            .identifier("Thing"),
+            .startOfScope("<"),
+            .startOfScope("["),
+            .startOfScope("("),
+            .identifier("Int"),
+            .endOfScope(")"),
+            .space(" "),
+            .keyword("throws"),
+            .space(" "),
+            .operator("->", .infix),
+            .space(" "),
+            .startOfScope("["),
+            .identifier("Int"),
+            .endOfScope("]"),
+            .endOfScope("]"),
+            .endOfScope(">"),
+            .startOfScope("("),
+            .startOfScope("["),
+            .endOfScope("]"),
+            .endOfScope(")"),
+        ]
+        XCTAssertEqual(tokenize(input), output)
+    }
+
     // MARK: optionals
 
     func testAssignOptional() {
@@ -4491,7 +4524,70 @@ class TokenizerTests: XCTestCase {
         XCTAssertEqual(tokenize(input), output)
     }
 
-    // MARK: Noncopyable
+    func testAnonymousOptionalKeyPath() {
+        let input = "let foo = \\.?.bar"
+        let output: [Token] = [
+            .keyword("let"),
+            .space(" "),
+            .identifier("foo"),
+            .space(" "),
+            .operator("=", .infix),
+            .space(" "),
+            .operator("\\", .prefix),
+            .operator(".", .prefix),
+            .operator("?", .postfix),
+            .operator(".", .infix),
+            .identifier("bar"),
+        ]
+        XCTAssertEqual(tokenize(input), output)
+    }
+
+    func testAnonymousOptionalSubscriptKeyPath() {
+        let input = "let foo = \\.?[0].bar"
+        let output: [Token] = [
+            .keyword("let"),
+            .space(" "),
+            .identifier("foo"),
+            .space(" "),
+            .operator("=", .infix),
+            .space(" "),
+            .operator("\\", .prefix),
+            .operator(".", .prefix),
+            .operator("?", .postfix),
+            .startOfScope("["),
+            .number("0", .integer),
+            .endOfScope("]"),
+            .operator(".", .infix),
+            .identifier("bar"),
+        ]
+        XCTAssertEqual(tokenize(input), output)
+    }
+
+    func testAttributeInsideGenericArguments() {
+        let input = "Foo<(@MainActor () -> Void)?>(nil)"
+        let output: [Token] = [
+            .identifier("Foo"),
+            .startOfScope("<"),
+            .startOfScope("("),
+            .keyword("@MainActor"),
+            .space(" "),
+            .startOfScope("("),
+            .endOfScope(")"),
+            .space(" "),
+            .operator("->", .infix),
+            .space(" "),
+            .identifier("Void"),
+            .endOfScope(")"),
+            .operator("?", .postfix),
+            .endOfScope(">"),
+            .startOfScope("("),
+            .identifier("nil"),
+            .endOfScope(")"),
+        ]
+        XCTAssertEqual(tokenize(input), output)
+    }
+
+    // MARK: Suppressed Conformances
 
     func testNoncopyableStructDeclaration() {
         let input = "struct Foo: ~Copyable {}"
@@ -4506,6 +4602,51 @@ class TokenizerTests: XCTestCase {
             .space(" "),
             .startOfScope("{"),
             .endOfScope("}"),
+        ]
+        XCTAssertEqual(tokenize(input), output)
+    }
+
+    func testSuppressedConformanceInWhereCondition() {
+        let input = "Foo<T> where T: ~Copyable"
+        let output: [Token] = [
+            .identifier("Foo"),
+            .startOfScope("<"),
+            .identifier("T"),
+            .endOfScope(">"),
+            .space(" "),
+            .keyword("where"),
+            .space(" "),
+            .identifier("T"),
+            .delimiter(":"),
+            .space(" "),
+            .operator("~", .prefix),
+            .identifier("Copyable"),
+        ]
+        XCTAssertEqual(tokenize(input), output)
+    }
+
+    func testSuppressedConformancesOnGenericParameters() {
+        let input = "Foo<T: ~Copyable, U: Sendable & ~Escapable>"
+        let output: [Token] = [
+            .identifier("Foo"),
+            .startOfScope("<"),
+            .identifier("T"),
+            .delimiter(":"),
+            .space(" "),
+            .operator("~", .prefix),
+            .identifier("Copyable"),
+            .delimiter(","),
+            .space(" "),
+            .identifier("U"),
+            .delimiter(":"),
+            .space(" "),
+            .identifier("Sendable"),
+            .space(" "),
+            .operator("&", .infix),
+            .space(" "),
+            .operator("~", .prefix),
+            .identifier("Escapable"),
+            .endOfScope(">"),
         ]
         XCTAssertEqual(tokenize(input), output)
     }

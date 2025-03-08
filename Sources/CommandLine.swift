@@ -194,6 +194,7 @@ func printHelp(as type: CLI.OutputType) {
     --fragment         \(stripMarkdown(Descriptors.fragment.help))
     --conflictmarkers  \(stripMarkdown(Descriptors.ignoreConflictMarkers.help))
     --swiftversion     \(stripMarkdown(Descriptors.swiftVersion.help))
+    --languagemode     \(stripMarkdown(Descriptors.languageMode.help))
     --minversion       The minimum SwiftFormat version to be used for these files
     --cache            Path to cache file, or "clear" or "ignore" the default cache
     --dryrun           Run in "dry" mode (without actually changing any files)
@@ -204,6 +205,7 @@ func printHelp(as type: CLI.OutputType) {
     --strict           Emit errors for unformatted code when formatting
     --verbose          Display detailed formatting output and warnings/errors
     --quiet            Disables non-critical output messages and warnings
+    --outputtokens     Outputs an array of tokens instead of text when using stdin
 
     SwiftFormat has a number of rules that can be enabled or disabled. By default
     most rules are enabled. Use --rules to display all enabled/disabled rules.
@@ -285,7 +287,7 @@ private func readConfigArg(
             print("warning: --exclude value '\(exclude)' did not match any files in \(directory).", as: .warning)
             config["exclude"] = nil
         } else {
-            config["exclude"] = excluded.map { $0.description }.sorted().joined(separator: ",")
+            config["exclude"] = excluded.map(\.description).sorted().joined(separator: ",")
         }
     }
     if let unexclude = config["unexclude"] {
@@ -294,7 +296,7 @@ private func readConfigArg(
             print("warning: --unexclude value '\(unexclude)' did not match any files in \(directory).", as: .warning)
             config["unexclude"] = nil
         } else {
-            config["unexclude"] = unexcluded.map { $0.description }.sorted().joined(separator: ",")
+            config["unexclude"] = unexcluded.map(\.description).sorted().joined(separator: ",")
         }
     }
     args = try mergeArguments(args, into: config)
@@ -342,38 +344,47 @@ func processArguments(_ args: [String], environment: [String: String] = [:], in 
         // Dry run
         let dryrun = lint || (args["dryrun"] != nil)
 
+        // Whether or not to output tokens instead of source code
+        let printTokens = args["outputtokens"] != nil
+
         // Warnings
         for warning in warningsForArguments(args) {
             print("warning: \(warning)", as: .warning)
         }
 
+        // add args to environment
+        let environment = environment.merging(args) { lhs, _ in lhs }
+
+        // Report URL
+        let reportURL: URL? = try args["report"].map { arg in
+            guard !arg.isEmpty else {
+                throw FormatError.options("--report argument expects a path")
+            }
+            return try parsePath(arg, for: "--output", in: directory)
+        }
+
         // Reporter
-        var reporter: Reporter? = try args["reporter"].map { identifier in
+        let reporter: Reporter = try args["reporter"].flatMap { identifier in
             guard let reporter = Reporters.reporter(
                 named: identifier,
                 environment: environment
             ) else {
                 var message = "'\(identifier)' is not a valid reporter"
+                // swiftformat:disable:next --preferKeyPath
                 let names = Reporters.all.map { $0.name }
                 if let match = identifier.bestMatches(in: names).first {
-                    message += "(did you mean '\(match)'?)"
+                    message += " (did you mean '\(match)'?)"
                 }
                 throw FormatError.options(message)
             }
             return reporter
-        }
+        } ?? reportURL.flatMap {
+            Reporters.reporter(for: $0, environment: environment)
+        } ?? DefaultReporter(environment: environment)
 
-        // Report URL
-        let reportURL: URL? = try args["report"].map { arg in
-            let url = try parsePath(arg, for: "--output", in: directory)
-            if reporter == nil {
-                reporter = Reporters.reporter(for: url, environment: environment)
-                guard reporter != nil else {
-                    throw FormatError
-                        .options("--report requires --reporter to be specified")
-                }
-            }
-            return url
+        // Throw if default reporter is used with explicit url
+        guard reportURL == nil || !(reporter is DefaultReporter) else {
+            throw FormatError.options("--report requires --reporter to be specified")
         }
 
         // Show help
@@ -431,7 +442,7 @@ func processArguments(_ args: [String], environment: [String: String] = [:], in 
         // Show rules
         if showRules {
             print("")
-            let rules = options.rules ?? allRules.subtracting(FormatRules.disabledByDefault)
+            let rules = options.rules ?? defaultRules
             for name in Array(allRules).sorted() {
                 let annotation: String
                 if rules.contains(name) {
@@ -487,6 +498,7 @@ func processArguments(_ args: [String], environment: [String: String] = [:], in 
                 keys: [.creationDateKey, .pathKey]
             )
             var formatOptions = options.formatOptions ?? .default
+
             formatOptions.fileInfo = FileInfo(
                 filePath: resourceValues.path,
                 creationDate: resourceValues.creationDate
@@ -526,9 +538,9 @@ func processArguments(_ args: [String], environment: [String: String] = [:], in 
                 throw FormatError.options("--output argument expects a value")
             } else if inputURLs.count > 1 {
                 throw FormatError.options("--output argument is only valid for a single input file or directory")
-            } else if arg == "stdout" {
+            } else if arg.lowercased() == "stdout" {
                 useStdout = true
-                return URL(string: arg)
+                return URL(string: "stdout")
             }
             if args["lint"] != nil {
                 print("warning: --output argument is unused when running in --lint mode", as: .warning)
@@ -536,7 +548,7 @@ func processArguments(_ args: [String], environment: [String: String] = [:], in 
             return try parsePath(arg, for: "--output", in: directory)
         }
 
-        guard !useStdout || (reporter == nil || reportURL != nil) else {
+        guard !useStdout || (reporter is DefaultReporter || reportURL != nil) else {
             throw FormatError.options("--report file must be specified when --output is stdout")
         }
 
@@ -692,18 +704,42 @@ func processArguments(_ args: [String], environment: [String: String] = [:], in 
                             status = .finished(.ok)
                             return
                         }
+
+                        let resourceValues = try getResourceValues(
+                            for: stdinURL.standardizedFileURL,
+                            keys: [.creationDateKey, .pathKey]
+                        )
+
+                        let fileInfo = collectFileInfo(inputURL: stdinURL,
+                                                       options: options,
+                                                       resourceValues: resourceValues)
+
+                        options.formatOptions?.fileInfo = fileInfo
                     }
-                    let output = try applyRules(
+                    let outputTokens = try applyRules(
                         input, options: options, lineRange: lineRange,
-                        verbose: verbose, lint: lint, lenient: lenient, reporter: reporter
+                        verbose: verbose, lint: lint, reporter: reporter
                     )
+                    let output = sourceCode(for: outputTokens)
                     if let outputURL = outputURL, !useStdout {
                         if !dryrun, (try? String(contentsOf: outputURL)) != output {
                             try write(output, to: outputURL)
                         }
-                    } else {
+                    } else if !lint {
                         // Write to stdout
-                        print(dryrun ? input : output, as: .raw)
+                        if printTokens {
+                            let tokensToPrint = dryrun ? tokenize(input) : outputTokens
+                            try print(OutputTokensData.encodedString(for: tokensToPrint), as: .raw)
+                        } else {
+                            print(dryrun ? input : output, as: .raw)
+                        }
+                    } else if let reporterOutput = try reporter.write() {
+                        if let reportURL = reportURL {
+                            print("Writing report file to \(reportURL.path)", as: .info)
+                            try reporterOutput.write(to: reportURL, options: .atomic)
+                        } else {
+                            print(String(decoding: reporterOutput, as: UTF8.self), as: .raw)
+                        }
                     }
                     let exitCode: ExitCode
                     if lint, output != input {
@@ -783,13 +819,12 @@ func processArguments(_ args: [String], environment: [String: String] = [:], in 
             return .error
         }
         if outputFlags.filesChecked == 0, outputFlags.filesSkipped == 0 {
-            let inputPaths = inputURLs.map { $0.path }.joined(separator: ", ")
+            let inputPaths = inputURLs.map(\.path).joined(separator: ", ")
             print("warning: No eligible files found at \(inputPaths).", as: .warning)
         }
-        if let reporter = reporter {
-            let reporterOutput = try reporter.write()
+        if let reporterOutput = try reporter.write() {
             if let reportURL = reportURL {
-                print("Writing report file to \(reportURL.path)")
+                print("Writing report file to \(reportURL.path)", as: .info)
                 try reporterOutput.write(to: reportURL, options: .atomic)
             } else {
                 print(String(decoding: reporterOutput, as: UTF8.self), as: .raw)
@@ -899,14 +934,14 @@ func computeHash(_ source: String) -> String {
 }
 
 func applyRules(_ source: String, options: Options, lineRange: ClosedRange<Int>?,
-                verbose: Bool, lint: Bool, lenient: Bool, reporter: Reporter?) throws -> String
+                verbose: Bool, lint: Bool, reporter: Reporter?) throws -> [Token]
 {
     // Parse source
     var tokens = tokenize(source)
 
     // Get rules
     let rulesByName = FormatRules.byName
-    let ruleNames = Array(options.rules ?? allRules.subtracting(FormatRules.disabledByDefault)).sorted()
+    let ruleNames = Array(options.rules ?? defaultRules).sorted()
     let rules = ruleNames.compactMap { rulesByName[$0] }
 
     if verbose, let path = options.formatOptions?.fileInfo.filePath {
@@ -926,7 +961,6 @@ func applyRules(_ source: String, options: Options, lineRange: ClosedRange<Int>?
     // Display info
     let updatedSource = sourceCode(for: tokens)
     if lint, updatedSource != source {
-        changes.forEach { print($0.description(asError: !lenient), as: lenient ? .warning : .error) }
         reporter?.report(changes)
     }
     if verbose {
@@ -942,7 +976,7 @@ func applyRules(_ source: String, options: Options, lineRange: ClosedRange<Int>?
     }
 
     // Output
-    return updatedSource
+    return tokens
 }
 
 func processInput(_ inputURLs: [URL],
@@ -953,7 +987,7 @@ func processInput(_ inputURLs: [URL],
                   verbose: Bool,
                   dryrun: Bool,
                   lint: Bool,
-                  lenient: Bool,
+                  lenient _: Bool,
                   cacheURL: URL?,
                   reporter: Reporter?) -> (OutputFlags, [Error])
 {
@@ -1017,7 +1051,7 @@ func processInput(_ inputURLs: [URL],
             let formatOptions = options.formatOptions ?? .default
             let range = lineRange.map { "\($0.lowerBound),\($0.upperBound);" } ?? ""
             // Check cache
-            let rules = options.rules ?? allRules.subtracting(FormatRules.disabledByDefault)
+            let rules = options.rules ?? defaultRules
             let configHash = computeHash("\(formatOptions)\(range)\(rules.sorted().joined(separator: ","))")
             let cachePrefix = "\(version);\(configHash);"
             let cacheKey: String = {
@@ -1043,9 +1077,9 @@ func processInput(_ inputURLs: [URL],
                         print("-- no changes (cached)", as: .success)
                     }
                 } else {
-                    output = try applyRules(input, options: options, lineRange: lineRange,
-                                            verbose: verbose, lint: lint, lenient: lenient,
-                                            reporter: reporter)
+                    let outputTokens = try applyRules(input, options: options, lineRange: lineRange,
+                                                      verbose: verbose, lint: lint, reporter: reporter)
+                    output = sourceCode(for: outputTokens)
                     if output != input {
                         sourceHash = nil
                     }
@@ -1054,7 +1088,7 @@ func processInput(_ inputURLs: [URL],
                     // Only bother computing this if cache is enabled
                     cachePrefix + (sourceHash ?? computeHash(output))
                 }
-                if outputURL.lastPathComponent.lowercased() == "stdout" {
+                if outputURL.path.components(separatedBy: "/").contains("stdout") {
                     if !dryrun {
                         // Write to stdout
                         print(output, as: .raw)
@@ -1160,4 +1194,28 @@ func processInput(_ inputURLs: [URL],
         }
     }
     return (outputFlags, errors)
+}
+
+/// The data format used with `--outputtokens`
+private struct OutputTokensData: Encodable {
+    init(tokens: [Token]) {
+        self.tokens = tokens
+        version = swiftFormatVersion
+    }
+
+    /// The SwiftFormat version that this data originated from
+    let version: String
+    /// A representation of the output in `Tokens`
+    let tokens: [Token]
+
+    /// Creates the `OutputTokensData` and encodes it to a JSON string
+    static func encodedString(for tokens: [Token]) throws -> String {
+        let outputData = OutputTokensData(tokens: tokens)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+
+        let encodedData = try encoder.encode(outputData)
+        return String(data: encodedData, encoding: .utf8)!
+    }
 }

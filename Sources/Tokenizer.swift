@@ -83,6 +83,7 @@ public extension String {
 /// Classes of token used for matching
 public enum TokenType {
     case space
+    case comment
     case linebreak
     case endOfStatement
     case startOfScope
@@ -113,7 +114,7 @@ public enum TokenType {
 }
 
 /// Numeric literal types
-public enum NumberType {
+public enum NumberType: String {
     case integer
     case decimal
     case binary
@@ -122,7 +123,7 @@ public enum NumberType {
 }
 
 /// Operator/operator types
-public enum OperatorType {
+public enum OperatorType: String {
     case none
     case infix
     case prefix
@@ -133,7 +134,7 @@ public enum OperatorType {
 public typealias OriginalLine = Int
 
 /// All token types
-public enum Token: Equatable {
+public enum Token: Hashable {
     case number(String, NumberType)
     case linebreak(String, OriginalLine)
     case startOfScope(String)
@@ -325,6 +326,8 @@ public extension Token {
         switch type {
         case .space:
             return isSpace
+        case .comment:
+            return isComment
         case .spaceOrComment:
             return isSpaceOrComment
         case .spaceOrLinebreak:
@@ -429,6 +432,15 @@ public extension Token {
              .startOfScope("//"),
              .startOfScope("/*"),
              .endOfScope("*/"):
+            return true
+        default:
+            return false
+        }
+    }
+
+    var isCommentBody: Bool {
+        switch self {
+        case .commentBody:
             return true
         default:
             return false
@@ -543,9 +555,31 @@ extension Token {
     }
 }
 
-extension Collection where Element == Token {
+extension Collection where Element == Token, Index == Int {
     var string: String {
-        map { $0.string }.joined()
+        map(\.string).joined()
+    }
+
+    /// A string representation of this array of tokens,
+    /// excluding any newlines and following indentation.
+    var stringExcludingLinebreaks: String {
+        var tokens: [Token] = []
+
+        var index = indices.startIndex
+        while index < indices.endIndex {
+            // Skip over any linebreaks, and any indentation following the linebreak
+            if self[index].isLinebreak {
+                index += 1
+                while self[index].isSpace, index < indices.endIndex {
+                    index += 1
+                }
+            }
+
+            tokens.append(self[index])
+            index += 1
+        }
+
+        return tokens.string
     }
 }
 
@@ -1450,7 +1484,19 @@ public func tokenize(_ source: String) -> [Token] {
             assertionFailure()
             return
         }
-        while let nextToken: Token = index + 1 < tokens.count ? tokens[index + 1] : nil,
+        if index > 0, case .operator("\\", _) = tokens[index - 1] {
+            switch string {
+            case ".?.":
+                tokens[index ... index] = [.operator(".", .prefix), .operator("?", .postfix), .operator(".", .infix)]
+                return
+            case ".?":
+                tokens[index ... index] = [.operator(".", .prefix), .operator("?", .postfix)]
+                return
+            default:
+                break
+            }
+        }
+        while let nextToken = index + 1 < tokens.count ? tokens[index + 1] : nil,
               case let .operator(nextString, _) = nextToken, !nextString.hasPrefix("\\"),
               string.hasPrefix(".") || !nextString.contains(".")
         {
@@ -1463,7 +1509,7 @@ public func tokenize(_ source: String) -> [Token] {
             scopeIndexStack = scopeIndexStack.map { $0 > index ? $0 - 1 : $0 }
         }
         var index = index
-        while let prevToken: Token = index > 0 ? tokens[index - 1] : nil,
+        while let prevToken = index > 0 ? tokens[index - 1] : nil,
               case let .operator(prevString, _) = prevToken, !isUnwrapOperator(at: index - 1),
               !string.hasPrefix("\\"), prevString.hasPrefix(".") || !string.contains(".")
         {
@@ -1783,7 +1829,7 @@ public func tokenize(_ source: String) -> [Token] {
                 switch token {
                 case let .operator(string, _):
                     switch string {
-                    case ".", "==", "?", "!", "&", "->":
+                    case ".", "==", "?", "!", "&", "->", "~":
                         if index(of: .nonSpaceOrCommentOrLinebreak, before: count - 1) == scopeIndex {
                             // These are allowed in a generic, but not as the first character
                             fallthrough
@@ -1799,7 +1845,9 @@ public func tokenize(_ source: String) -> [Token] {
                     convertOpeningChevronToOperator(at: scopeIndex)
                     processToken()
                     return
-                case .endOfScope, .keyword:
+                case .keyword("throws"):
+                    break
+                case .keyword where !token.isAttribute, .endOfScope:
                     // If we encountered a keyword, or closing scope token that wasn't >
                     // then the opening < must have been an operator after all
                     convertOpeningChevronToOperator(at: scopeIndex)
@@ -1895,7 +1943,7 @@ public func tokenize(_ source: String) -> [Token] {
         token = tokens[count - 1]
         switch token {
         case .startOfScope("/"):
-            if characters.first.map({ $0.isSpaceOrLinebreak }) ?? true {
+            if characters.first.map(\.isSpaceOrLinebreak) ?? true {
                 // Misidentified as regex
                 token = .operator("/", .none)
                 tokens[count - 1] = token
@@ -1978,4 +2026,50 @@ public func tokenize(_ source: String) -> [Token] {
     }
 
     return tokens
+}
+
+extension Token: Encodable {
+    private enum CodingKeys: CodingKey {
+        // Properties shared by all tokens
+        case type
+        case string
+        // Properties unique to individual tokens
+        case originalLine
+        case numberType
+        case operatorType
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(typeName, forKey: .type)
+        try container.encode(string, forKey: .string)
+
+        switch self {
+        case let .linebreak(_, originalLine):
+            try container.encode(originalLine, forKey: .originalLine)
+        case let .number(_, numberType):
+            try container.encode(numberType.rawValue, forKey: .numberType)
+        case let .operator(_, operatorType):
+            try container.encode(operatorType.rawValue, forKey: .operatorType)
+        default:
+            break
+        }
+    }
+
+    private var typeName: String {
+        switch self {
+        case .number: return "number"
+        case .linebreak: return "linebreak"
+        case .startOfScope: return "startOfScope"
+        case .endOfScope: return "endOfScope"
+        case .delimiter: return "delimiter"
+        case .operator: return "operator"
+        case .stringBody: return "stringBody"
+        case .keyword: return "keyword"
+        case .identifier: return "identifier"
+        case .space: return "space"
+        case .commentBody: return "commentBody"
+        case .error: return "error"
+        }
+    }
 }

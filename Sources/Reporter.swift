@@ -38,20 +38,43 @@ protocol Reporter {
     init(environment: [String: String])
 
     func report(_ changes: [Formatter.Change])
-    func write() throws -> Data
+    func write() throws -> Data?
+}
+
+final class DefaultReporter: Reporter {
+    static let name: String = "default"
+    static let fileExtension: String? = nil
+
+    private let quietMode: Bool
+    private let lenient: Bool
+
+    init(environment: [String: String]) {
+        quietMode = environment["quiet"] != nil
+        lenient = environment["lenient"] != nil
+    }
+
+    func report(_ changes: [Formatter.Change]) {
+        if !quietMode {
+            for change in changes {
+                CLI.print(change.description(asError: !lenient), lenient ? .warning : .error)
+            }
+        }
+    }
+
+    // TODO: support file output?
+    func write() throws -> Data? { nil }
 }
 
 enum Reporters {
     static let all: [Reporter.Type] = [
         JSONReporter.self,
         GithubActionsLogReporter.self,
+        XMLReporter.self,
     ]
 
     static var help: String {
         let names = all.map { "\"\($0.name)\"" }
-        return names.dropLast().joined(separator: ", ") + (names.last.map {
-            " or \($0)"
-        } ?? "")
+        return names.joined(separator: ", ")
     }
 
     static func reporter(named: String, environment: [String: String]) -> Reporter? {

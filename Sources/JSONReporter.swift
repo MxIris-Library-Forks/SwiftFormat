@@ -43,7 +43,7 @@ final class JSONReporter: Reporter {
         self.changes.append(contentsOf: changes)
     }
 
-    func write() throws -> Data {
+    func write() throws -> Data? {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
         encoder.outputFormatting = .prettyPrinted
@@ -51,39 +51,30 @@ final class JSONReporter: Reporter {
             encoder.outputFormatting.insert(.sortedKeys)
         }
         let stripSlashes: Bool
-        #if swift(>=5.2)
-            if #available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *) {
-                stripSlashes = false
-                encoder.outputFormatting.insert(.withoutEscapingSlashes)
-            } else {
-                stripSlashes = true
-            }
-        #else
+        if #available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *) {
+            stripSlashes = false
+            encoder.outputFormatting.insert(.withoutEscapingSlashes)
+        } else {
             stripSlashes = true
-        #endif
+        }
         var data = try encoder.encode(changes.map(ReportItem.init))
         if stripSlashes, let string = String(data: data, encoding: .utf8) {
-            data = string.replacingOccurrences(of: "\\/", with: "/").data(using: .utf8) ?? data
+            data = Data(string.replacingOccurrences(of: "\\/", with: "/").utf8)
         }
         return data
     }
 }
 
 private struct ReportItem: Encodable {
-    var change: Formatter.Change
+    let file: String?
+    let line: Int
+    let reason: String
+    let ruleID: String
 
-    enum CodingKeys: String, CodingKey {
-        case file
-        case line
-        case reason
-        case ruleID
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encodeIfPresent(change.filePath, forKey: .file)
-        try container.encode(change.line, forKey: .line)
-        try container.encode(change.help, forKey: .reason)
-        try container.encode(change.rule.name, forKey: .ruleID)
+    init(_ change: Formatter.Change) {
+        file = change.filePath
+        line = change.line
+        reason = change.help
+        ruleID = change.rule.name
     }
 }
